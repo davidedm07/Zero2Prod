@@ -23,19 +23,9 @@ pub async fn subscribe(
     form_data: web::Form<FormData>,
     db_connection_pool: web::Data<PgPool>,
 ) -> HttpResponse {
-    let subscriber_name = match SubscriberName::parse(form_data.0.name) {
-        Ok(subscriber_name) => subscriber_name,
+    let subscriber = match form_data.0.try_into() {
+        Ok(subscriber) => subscriber,
         Err(_) => return HttpResponse::BadRequest().finish(),
-    };
-
-    let subscriber_email = match SubscriberEmail::parse(form_data.0.email) {
-        Ok(subscriber_email) => subscriber_email,
-        Err(_) => return HttpResponse::BadRequest().finish(),
-    };
-
-    let subscriber = Subscriber {
-        name: subscriber_name,
-        email: subscriber_email,
     };
 
     match insert_subscriber(&subscriber, &db_connection_pool).await {
@@ -70,4 +60,15 @@ pub async fn insert_subscriber(
     })?;
 
     Ok(())
+}
+
+impl TryFrom<FormData> for Subscriber {
+    type Error = String;
+
+    fn try_from(form: FormData) -> Result<Self, Self::Error> {
+        let name = SubscriberName::parse(form.name)?;
+        let email = SubscriberEmail::parse(form.email)?;
+
+        Ok(Self { name, email })
+    }
 }
