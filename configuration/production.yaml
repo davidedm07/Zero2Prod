@@ -2,3 +2,6 @@ application:
   host: 0.0.0.0
 database:
   require_ssl: false
+email_client:
+  base_url: "URL_TO_3rd_PARTY_API"
+  sender_email: "SENDER_EMAIL"

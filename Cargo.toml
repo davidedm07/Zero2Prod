@@ -16,7 +16,6 @@ actix-web = "4"
 chrono = { version = "0.4.23", default-features = false, feautures = ["clock"] }
 claim = "0.5"
 config = "0.13"
-reqwest = "0.11"
 secrecy = { version = "0.8", features = ["serde"] }
 serde = { version = "1.0.149", features = ["derive"] }
 serde-aux = "3"
@@ -29,6 +28,11 @@ tracing-subscriber = { version = "0.3.16", features = ["registry", "env-filter"]
 unicode-segmentation = "1.7.1"
 uuid = { version = "1.2.2", features = ["v4"] }
 validator = { version = "0.12", features = ["derive"] }
+
+[dependencies.reqwest]
+version = "0.11"
+default-features = false
+features = ["json", "rustls-tls"]
 
 [dependencies.sqlx]
 version = "0.6.2"
