@@ -41,7 +41,12 @@ pub async fn spawn_app() -> TestApp {
         .email_client
         .sender()
         .expect("Invalid sender email address");
-    let email_client = EmailClient::new(configuration.email_client.base_url, sender_email);
+    let url = EmailClient::parse_url(&configuration.email_client.base_url);
+    let email_client = EmailClient::new(
+        url,
+        sender_email,
+        configuration.email_client.authorization_token,
+    );
 
     let server =
         run(listener, connection_pool.clone(), email_client).expect("Failed to bind to address");

@@ -53,3 +53,5 @@ fake = "2.5.0"
 quickcheck = "1"
 quickcheck_macros = "1"
 rand = "0.8"
+tokio = { version = "1", features = ["macros", "rt"] }
+wiremock = "0.5"
