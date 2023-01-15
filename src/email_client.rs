@@ -10,6 +10,7 @@ pub struct EmailClient {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "PascalCase")]
 struct SendEMailRequest {
     from: String,
     to: String,
@@ -70,6 +71,7 @@ impl EmailClient {
 
 #[cfg(test)]
 mod tests {
+
     use crate::{domain::SubscriberEmail, email_client::EmailClient};
     use fake::{
         faker::{
@@ -79,16 +81,23 @@ mod tests {
         Fake, Faker,
     };
     use secrecy::Secret;
-    use wiremock::{matchers::any, Mock, MockServer, ResponseTemplate};
+    use wiremock::{
+        matchers::{header, header_exists, method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
 
     #[tokio::test]
-    async fn send_email_fires_a_request_to_base_url() {
+    async fn send_email_sends_expected_request() {
         let mock_server = MockServer::start().await;
         let sender = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
         let url = EmailClient::parse_url(&mock_server.uri());
         let email_client = EmailClient::new(url, sender, Secret::new(Faker.fake()));
 
-        Mock::given(any())
+        Mock::given(header_exists("X-Postmark-Server-Token"))
+            .and(header("Content-Type", "application/json"))
+            .and(path("/email"))
+            .and(method("POST"))
+            .and(SendEmailBodyMatcher)
             .respond_with(ResponseTemplate::new(200))
             .expect(1)
             .mount(&mock_server)
@@ -101,5 +110,24 @@ mod tests {
         let _ = email_client
             .send_email(subscriber_email, &subject, &content, &content)
             .await;
+    }
+
+    struct SendEmailBodyMatcher;
+
+    // implementing Match trait to check if the body received by the wiremock server
+    // contains the expected fields
+    impl wiremock::Match for SendEmailBodyMatcher {
+        fn matches(&self, request: &wiremock::Request) -> bool {
+            let result: Result<serde_json::Value, _> = serde_json::from_slice(&request.body);
+            if let Ok(body) = result {
+                body.get("From").is_some()
+                    && body.get("To").is_some()
+                    && body.get("Subject").is_some()
+                    && body.get("TextBody").is_some()
+                    && body.get("HtmlBody").is_some()
+            } else {
+                false
+            }
+        }
     }
 }
