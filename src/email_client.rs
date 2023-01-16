@@ -24,10 +24,11 @@ impl EmailClient {
         base_url: Url,
         sender: SubscriberEmail,
         authorization_token: Secret<String>,
+        timeout: std::time::Duration,
     ) -> Self {
         Self {
             sender,
-            client: Client::new(),
+            client: Client::builder().timeout(timeout).build().unwrap(),
             base_url,
             authorization_token,
         }
@@ -62,7 +63,7 @@ impl EmailClient {
         Ok(())
     }
 
-    pub fn parse_url(base_url: &String) -> Url {
+    pub fn parse_url(base_url: String) -> Url {
         match Url::parse(&base_url) {
             Ok(url) => url,
             Err(_) => panic!("An invalid Url has been provided to the email client"),
@@ -84,61 +85,9 @@ mod tests {
     };
     use secrecy::Secret;
     use wiremock::{
-        matchers::{header, header_exists, method, path, any},
+        matchers::{any, header, header_exists, method, path},
         Mock, MockServer, ResponseTemplate,
     };
-
-    #[tokio::test]
-    async fn send_email_sends_expected_request() {
-        let mock_server = MockServer::start().await;
-        let sender = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let url = EmailClient::parse_url(&mock_server.uri());
-        let email_client = EmailClient::new(url, sender, Secret::new(Faker.fake()));
-
-        Mock::given(header_exists("X-Postmark-Server-Token"))
-            .and(header("Content-Type", "application/json"))
-            .and(path("/email"))
-            .and(method("POST"))
-            .and(SendEmailBodyMatcher)
-            .respond_with(ResponseTemplate::new(200))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
-
-        let subscriber_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let subject: String = Sentence(1..2).fake();
-        let content: String = Paragraph(1..10).fake();
-
-        let outcome = email_client
-            .send_email(subscriber_email, &subject, &content, &content)
-            .await;
-        
-        assert_ok!(outcome);
-    }
-
-    #[tokio::test]
-    async fn send_email_fails_if_server_returns_500() {
-        let mock_server = MockServer::start().await;
-        let sender = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let url = EmailClient::parse_url(&mock_server.uri());
-        let email_client = EmailClient::new(url, sender, Secret::new(Faker.fake()));
-
-        Mock::given(any())
-        .respond_with(ResponseTemplate::new(500))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-        let subscriber_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let subject: String = Sentence(1..2).fake();
-        let content: String = Paragraph(1..10).fake();
-
-        let outcome = email_client
-        .send_email(subscriber_email, &subject, &content, &content)
-        .await;
-
-        assert_err!(outcome);
-    }
 
     struct SendEmailBodyMatcher;
 
@@ -157,5 +106,89 @@ mod tests {
                 false
             }
         }
+    }
+
+    fn subject() -> String {
+        Sentence(1..2).fake()
+    }
+
+    fn content() -> String {
+        Paragraph(1..10).fake()
+    }
+
+    fn email() -> SubscriberEmail {
+        SubscriberEmail::parse(SafeEmail().fake()).unwrap()
+    }
+
+    fn email_client(base_url: String) -> EmailClient {
+        let url = EmailClient::parse_url(base_url);
+        EmailClient::new(
+            url,
+            email(),
+            Secret::new(Faker.fake()),
+            std::time::Duration::from_millis(200),
+        )
+    }
+
+    #[tokio::test]
+    async fn send_email_sends_expected_request() {
+        let mock_server = MockServer::start().await;
+        let email_client = email_client(mock_server.uri());
+
+        Mock::given(header_exists("X-Postmark-Server-Token"))
+            .and(header("Content-Type", "application/json"))
+            .and(path("/email"))
+            .and(method("POST"))
+            .and(SendEmailBodyMatcher)
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let content = content();
+        let outcome = email_client
+            .send_email(email(), &subject(), &content, &content)
+            .await;
+
+        assert_ok!(outcome);
+    }
+
+    #[tokio::test]
+    async fn send_email_fails_if_server_returns_500() {
+        let mock_server = MockServer::start().await;
+        let email_client = email_client(mock_server.uri());
+
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let content = content();
+        let outcome = email_client
+            .send_email(email(), &subject(), &content, &content)
+            .await;
+
+        assert_err!(outcome);
+    }
+
+    #[tokio::test]
+    async fn send_email_times_out_if_server_takes_too_long() {
+        let mock_server = MockServer::start().await;
+        let email_client = email_client(mock_server.uri());
+        let response = ResponseTemplate::new(500).set_delay(std::time::Duration::from_secs(120));
+
+        Mock::given(any())
+            .respond_with(response)
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let content = content();
+        let outcome = email_client
+            .send_email(email(), &subject(), &content, &content)
+            .await;
+
+        assert_err!(outcome);
     }
 }

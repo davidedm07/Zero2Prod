@@ -41,11 +41,12 @@ pub async fn spawn_app() -> TestApp {
         .email_client
         .sender()
         .expect("Invalid sender email address");
-    let url = EmailClient::parse_url(&configuration.email_client.base_url);
+    let url = EmailClient::parse_url(configuration.email_client.base_url);
     let email_client = EmailClient::new(
         url,
         sender_email,
         configuration.email_client.authorization_token,
+        std::time::Duration::from_millis(configuration.email_client.timeout_milliseconds),
     );
 
     let server =
