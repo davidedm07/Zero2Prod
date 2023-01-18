@@ -1,14 +1,26 @@
 use once_cell::sync::Lazy;
+use reqwest::Client;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
-use std::net::TcpListener;
 use uuid::Uuid;
 use zero2prod::configuration::{get_configuration, DatabaseSettings};
-use zero2prod::startup::run;
+use zero2prod::startup::{get_connection_pool, Application};
 use zero2prod::telemetry::{get_subscriber, init_subscriber};
 
 pub struct TestApp {
     pub address: String,
     pub db_connection_pool: PgPool,
+}
+
+impl TestApp {
+    pub async fn post_subscriptions(&self, body: String) -> reqwest::Response {
+        Client::new()
+            .post(&format!("{}/subscriptions", &self.address))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body)
+            .send()
+            .await
+            .expect("Failed to execute request")
+    }
 }
 
 static TRACING: Lazy<()> = Lazy::new(|| {
@@ -26,30 +38,33 @@ static TRACING: Lazy<()> = Lazy::new(|| {
 
 pub async fn spawn_app() -> TestApp {
     Lazy::force(&TRACING);
-    let localhost = "127.0.0.1";
-    let listener =
-        TcpListener::bind(&format!("{}:0", localhost)).expect("Failed to bind random port");
-    let port = listener.local_addr().unwrap().port();
-    let address = format!("http://{}:{}", localhost, port);
 
-    let mut configuration = get_configuration().expect("Failed to read configuration");
-    configuration.database.database_name = Uuid::new_v4().to_string();
-    let connection_pool = configure_database(&configuration.database).await;
+    let configuration = {
+        let mut c = get_configuration().expect("Failed to read configuration");
+        c.database.database_name = Uuid::new_v4().to_string();
+        c.application.port = 0;
+        c
+    };
 
-    let server = run(listener, connection_pool.clone()).expect("Failed to bind to address");
-    let _ = tokio::spawn(server);
+    configure_database(&configuration.database).await;
+
+    let application = Application::build(configuration.clone())
+        .await
+        .expect("Failed to build application");
+
+    let address = format!("http://localhost:{}", application.port());
+    let _ = tokio::spawn(application.run_until_stopped());
 
     TestApp {
         address,
-        db_connection_pool: connection_pool,
+        db_connection_pool: get_connection_pool(&configuration.database),
     }
 }
 
 pub async fn configure_database(configuration: &DatabaseSettings) -> PgPool {
-    let mut connection =
-        PgConnection::connect_with(&configuration.without_db())
-            .await
-            .expect("Failed to connect to Postgres");
+    let mut connection = PgConnection::connect_with(&configuration.without_db())
+        .await
+        .expect("Failed to connect to Postgres");
 
     connection
         .execute(format!(r#"CREATE database "{}""#, configuration.database_name).as_str())
