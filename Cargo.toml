@@ -27,6 +27,7 @@ tracing-log = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["registry", "env-filter"] }
 unicode-segmentation = "1.7.1"
 uuid = { version = "1.2.2", features = ["v4"] }
+url = { version = "2.2.0", features = ["serde"] }
 validator = { version = "0.12", features = ["derive"] }
 
 [dependencies.reqwest]

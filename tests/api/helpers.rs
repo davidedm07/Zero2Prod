@@ -1,10 +1,8 @@
 use once_cell::sync::Lazy;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
-use std::net::TcpListener;
 use uuid::Uuid;
 use zero2prod::configuration::{get_configuration, DatabaseSettings};
-use zero2prod::email_client::EmailClient;
-use zero2prod::startup::run;
+use zero2prod::startup::{get_connection_pool, Application};
 use zero2prod::telemetry::{get_subscriber, init_subscriber};
 
 pub struct TestApp {
@@ -27,35 +25,26 @@ static TRACING: Lazy<()> = Lazy::new(|| {
 
 pub async fn spawn_app() -> TestApp {
     Lazy::force(&TRACING);
-    let localhost = "127.0.0.1";
-    let listener =
-        TcpListener::bind(&format!("{}:0", localhost)).expect("Failed to bind random port");
-    let port = listener.local_addr().unwrap().port();
-    let address = format!("http://{}:{}", localhost, port);
 
-    let mut configuration = get_configuration().expect("Failed to read configuration");
-    configuration.database.database_name = Uuid::new_v4().to_string();
-    let connection_pool = configure_database(&configuration.database).await;
+    let configuration = {
+        let mut c = get_configuration().expect("Failed to read configuration");
+        c.database.database_name = Uuid::new_v4().to_string();
+        c.application.port = 0;
+        c
+    };
 
-    let sender_email = configuration
-        .email_client
-        .sender()
-        .expect("Invalid sender email address");
-    let url = EmailClient::parse_url(configuration.email_client.base_url);
-    let email_client = EmailClient::new(
-        url,
-        sender_email,
-        configuration.email_client.authorization_token,
-        std::time::Duration::from_millis(configuration.email_client.timeout_milliseconds),
-    );
+    configure_database(&configuration.database).await;
 
-    let server =
-        run(listener, connection_pool.clone(), email_client).expect("Failed to bind to address");
-    let _ = tokio::spawn(server);
+    let application = Application::build(configuration.clone())
+        .await
+        .expect("Failed to build application");
+
+    let address = format!("http://localhost:{}", application.port());
+    let _ = tokio::spawn(application.run_until_stopped());
 
     TestApp {
         address,
-        db_connection_pool: connection_pool,
+        db_connection_pool: get_connection_pool(&configuration.database),
     }
 }
 
