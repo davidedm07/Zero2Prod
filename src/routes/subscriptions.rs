@@ -1,4 +1,7 @@
-use crate::domain::{Subscriber, SubscriberEmail, SubscriberName};
+use crate::{
+    domain::{Subscriber, SubscriberEmail, SubscriberName},
+    email_client::EmailClient,
+};
 use actix_web::{web, HttpResponse};
 use chrono::Utc;
 use serde::Deserialize;
@@ -13,7 +16,7 @@ pub struct FormData {
 
 #[tracing::instrument(
     name = "Adding a new subscriber",
-    skip(form_data, db_connection_pool),
+    skip(form_data, db_connection_pool, email_client),
     fields(
         subscriber_email = %form_data.email,
         subscriber_name = %form_data.name
@@ -22,19 +25,36 @@ pub struct FormData {
 pub async fn subscribe(
     form_data: web::Form<FormData>,
     db_connection_pool: web::Data<PgPool>,
+    email_client: web::Data<EmailClient>,
 ) -> HttpResponse {
     let subscriber = match form_data.0.try_into() {
         Ok(subscriber) => subscriber,
         Err(_) => return HttpResponse::BadRequest().finish(),
     };
 
-    match insert_subscriber(&subscriber, &db_connection_pool).await {
-        Ok(_) => HttpResponse::Ok().finish(),
-        Err(e) => {
-            tracing::error!("Failed to execute query: {:?}", e);
-            HttpResponse::InternalServerError().finish()
-        }
+    if insert_subscriber(&subscriber, &db_connection_pool)
+        .await
+        .is_err()
+    {
+        tracing::error!("Failed to insert subscriber");
+        return HttpResponse::InternalServerError().finish();
     }
+
+    if email_client
+        .send_email(
+            subscriber.email,
+            "Welcome",
+            "Welcome to the newsletter",
+            "Welcome to the newsletter",
+        )
+        .await
+        .is_err()
+    {
+        tracing::error!("Failed to send confirmation email");
+        return HttpResponse::InternalServerError().finish();
+    }
+
+    HttpResponse::Ok().finish()
 }
 
 #[tracing::instrument(
