@@ -40,13 +40,7 @@ pub async fn subscribe(
         return HttpResponse::InternalServerError().finish();
     }
 
-    if email_client
-        .send_email(
-            subscriber.email,
-            "Welcome",
-            "Welcome to the newsletter",
-            "Welcome to the newsletter",
-        )
+    if send_confirmation_email(&email_client, subscriber)
         .await
         .is_err()
     {
@@ -66,10 +60,10 @@ pub async fn insert_subscriber(
     db_connection_pool: &web::Data<PgPool>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
-        r#"INSERT INTO subscriptions (id, email, name, subscribed_at, status) VALUES ($1, $2, $3, $4, 'confirmed')"#,
+        r#"INSERT INTO subscriptions (id, email, name, subscribed_at, status) VALUES ($1, $2, $3, $4, 'pending confirmation')"#,
         Uuid::new_v4(),
-        subscriber.name.as_ref(),
         subscriber.email.as_ref(),
+        subscriber.name.as_ref(),
         Utc::now()
     )
     .execute(db_connection_pool.get_ref())
@@ -80,6 +74,29 @@ pub async fn insert_subscriber(
     })?;
 
     Ok(())
+}
+
+#[tracing::instrument(name = "Sending confirmation email", skip(email_client, subscriber))]
+pub async fn send_confirmation_email(
+    email_client: &EmailClient,
+    subscriber: Subscriber,
+) -> Result<(), reqwest::Error> {
+    let confirmation_link = "https://confirmation-api.com/subscriptions/confirm";
+
+    let plain_body = format!(
+        "Welcome to our newsletter!\nVisit {} to confirm subscription",
+        confirmation_link
+    );
+
+    let html_body = format!(
+        "Welcome to our newsletter!<br />\
+    Click <a href=\"{}\"> here </a> to confirm your subscription.",
+        confirmation_link
+    );
+
+    email_client
+        .send_email(subscriber.email, "Welcome", &plain_body, &html_body)
+        .await
 }
 
 impl TryFrom<FormData> for Subscriber {

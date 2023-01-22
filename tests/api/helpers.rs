@@ -9,6 +9,7 @@ use zero2prod::telemetry::{get_subscriber, init_subscriber};
 
 pub struct TestApp {
     pub address: String,
+    pub port: u16,
     pub db_connection_pool: PgPool,
     pub email_server: MockServer,
 }
@@ -58,11 +59,13 @@ pub async fn spawn_app() -> TestApp {
         .await
         .expect("Failed to build application");
 
-    let address = format!("http://localhost:{}", application.port());
+    let application_port = application.port();
+    let address = format!("http://localhost:{}", application_port);
     let _ = tokio::spawn(application.run_until_stopped());
 
     TestApp {
         address,
+        port: application_port,
         db_connection_pool: get_connection_pool(&configuration.database),
         email_server,
     }
