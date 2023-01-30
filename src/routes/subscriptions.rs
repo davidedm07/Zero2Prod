@@ -4,6 +4,8 @@ use crate::{
 };
 use actix_web::{web, HttpResponse};
 use chrono::Utc;
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use reqwest::Url;
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -16,7 +18,7 @@ pub struct FormData {
 
 #[tracing::instrument(
     name = "Adding a new subscriber",
-    skip(form_data, db_connection_pool, email_client),
+    skip(form_data, db_connection_pool, email_client, base_url),
     fields(
         subscriber_email = %form_data.email,
         subscriber_name = %form_data.name
@@ -26,21 +28,32 @@ pub async fn subscribe(
     form_data: web::Form<FormData>,
     db_connection_pool: web::Data<PgPool>,
     email_client: web::Data<EmailClient>,
+    base_url: web::Data<Url>,
 ) -> HttpResponse {
     let subscriber = match form_data.0.try_into() {
         Ok(subscriber) => subscriber,
         Err(_) => return HttpResponse::BadRequest().finish(),
     };
 
-    if insert_subscriber(&subscriber, &db_connection_pool)
+    let subscriber_id = match insert_subscriber(&subscriber, &db_connection_pool).await {
+        Ok(subscriber_id) => subscriber_id,
+        Err(_) => {
+            tracing::error!("Failed to insert subscriber");
+            return HttpResponse::InternalServerError().finish();
+        }
+    };
+
+    let subscription_token = generate_subscription_token();
+
+    if store_token(&db_connection_pool, subscriber_id, &subscription_token)
         .await
         .is_err()
     {
-        tracing::error!("Failed to insert subscriber");
+        tracing::error!("Failed to store subscription token into database");
         return HttpResponse::InternalServerError().finish();
     }
 
-    if send_confirmation_email(&email_client, subscriber)
+    if send_confirmation_email(&email_client, subscriber, &base_url, &subscription_token)
         .await
         .is_err()
     {
@@ -58,10 +71,11 @@ pub async fn subscribe(
 pub async fn insert_subscriber(
     subscriber: &Subscriber,
     db_connection_pool: &web::Data<PgPool>,
-) -> Result<(), sqlx::Error> {
+) -> Result<Uuid, sqlx::Error> {
+    let subscriber_id = Uuid::new_v4();
     sqlx::query!(
         r#"INSERT INTO subscriptions (id, email, name, subscribed_at, status) VALUES ($1, $2, $3, $4, 'pending confirmation')"#,
-        Uuid::new_v4(),
+        subscriber_id,
         subscriber.email.as_ref(),
         subscriber.name.as_ref(),
         Utc::now()
@@ -73,15 +87,52 @@ pub async fn insert_subscriber(
         e
     })?;
 
+    Ok(subscriber_id)
+}
+
+#[tracing::instrument(
+    name = "Storing subscription token into database",
+    skip(db_connection_pool, subscription_token)
+)]
+pub async fn store_token(
+    db_connection_pool: &web::Data<PgPool>,
+    subscriber_id: Uuid,
+    subscription_token: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"INSERT INTO subscription_tokens (subscription_token, subscriber_id) VALUES ($1, $2)"#,
+        subscription_token,
+        subscriber_id,
+    )
+    .execute(db_connection_pool.get_ref())
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to execute query: {:?}", e);
+        e
+    })?;
+
     Ok(())
 }
 
-#[tracing::instrument(name = "Sending confirmation email", skip(email_client, subscriber))]
+#[tracing::instrument(
+    name = "Sending confirmation email",
+    skip(email_client, subscriber, base_url)
+)]
 pub async fn send_confirmation_email(
     email_client: &EmailClient,
     subscriber: Subscriber,
+    base_url: &Url,
+    confirmation_token: &str,
 ) -> Result<(), reqwest::Error> {
-    let confirmation_link = "https://confirmation-api.com/subscriptions/confirm";
+    let confirmation_link = base_url
+        .join(
+            format!(
+                "/subscriptions/confirm?subscription_token={}",
+                confirmation_token
+            )
+            .as_str(),
+        )
+        .unwrap();
 
     let plain_body = format!(
         "Welcome to our newsletter!\nVisit {} to confirm subscription",
@@ -108,4 +159,12 @@ impl TryFrom<FormData> for Subscriber {
 
         Ok(Self { name, email })
     }
+}
+
+fn generate_subscription_token() -> String {
+    let mut rng = thread_rng();
+    std::iter::repeat_with(|| rng.sample(Alphanumeric))
+        .map(char::from)
+        .take(25)
+        .collect()
 }
