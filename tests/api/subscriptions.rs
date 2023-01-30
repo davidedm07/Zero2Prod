@@ -3,8 +3,9 @@ use crate::helpers::spawn_app;
 #[tokio::test]
 async fn subscribe_returns_200_for_valid_form_data() {
     let test_app = spawn_app().await;
-
     let body = "name=Jon%20Doe&email=jondoe%40email.com";
+
+    test_app.email_mock_200_response().await;
     let response = test_app.post_subscriptions(body.into()).await;
 
     assert_eq!(200, response.status().as_u16());
@@ -33,4 +34,41 @@ async fn subscribe_returns_400_when_data_is_missing_or_empty() {
             error_message
         );
     }
+}
+
+#[tokio::test]
+async fn subscribe_sends_confirmation_email() {
+    let test_app = spawn_app().await;
+
+    let body = "name=Jon%20Doe&email=jondoe%40email.com";
+
+    test_app.email_mock_200_response().await;
+
+    let response = test_app.post_subscriptions(body.into()).await;
+    let email_request = &test_app.email_server.received_requests().await.unwrap()[0];
+    let confirmation_links = test_app.get_confirmation_links(email_request);
+
+    let html_link = confirmation_links.html;
+    let text_link = confirmation_links.plain_text;
+
+    assert_eq!(html_link, text_link);
+    assert_eq!(200, response.status().as_u16());
+}
+
+#[tokio::test]
+async fn subscribe_persists_subscriber() {
+    let test_app = spawn_app().await;
+    let body = "name=Jon%20Doe&email=jondoe%40email.com";
+
+    test_app.email_mock_200_response().await;
+    test_app.post_subscriptions(body.into()).await;
+
+    let saved = sqlx::query!("SELECT email, name, status FROM subscriptions")
+        .fetch_one(&test_app.db_connection_pool)
+        .await
+        .expect("Failed to fetch saved subscription");
+
+    assert_eq!(saved.email, "jondoe@email.com");
+    assert_eq!(saved.name, "Jon Doe");
+    assert_eq!(saved.status, "pending confirmation");
 }
