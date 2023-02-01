@@ -14,6 +14,20 @@ async fn confirmation_without_token_are_rejected_with_a_400() {
 }
 
 #[tokio::test]
+async fn invalid_confirmation_token_cause_error() {
+    let test_app = spawn_app().await;
+
+    let response = reqwest::get(format!(
+        "{}/subscriptions/confirm?token=invalid",
+        test_app.address,
+    ))
+    .await
+    .unwrap();
+
+    assert_eq!(400, response.status().as_u16());
+}
+
+#[tokio::test]
 async fn the_link_returned_by_subscribe_returns_a_200_if_called() {
     let test_app = spawn_app().await;
     let body = "name=Jon%20Doe&email=jondoe%40email.com";

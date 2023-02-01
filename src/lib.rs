@@ -1,4 +1,5 @@
 pub mod configuration;
+pub mod database_helper;
 pub mod domain;
 pub mod email_client;
 pub mod routes;
