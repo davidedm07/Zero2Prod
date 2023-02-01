@@ -71,10 +71,14 @@ impl TestApp {
     }
 
     pub async fn email_mock_200_response(&self) {
+        self.email_mock_200_response_with_times(1).await
+    }
+
+    pub async fn email_mock_200_response_with_times(&self, times: u64) {
         Mock::given(path("/email"))
             .and(method("POST"))
             .respond_with(ResponseTemplate::new(200))
-            .expect(1)
+            .expect(times)
             .mount(&self.email_server)
             .await;
     }

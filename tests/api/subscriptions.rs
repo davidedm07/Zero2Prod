@@ -72,3 +72,18 @@ async fn subscribe_persists_subscriber() {
     assert_eq!(saved.name, "Jon Doe");
     assert_eq!(saved.status, "pending confirmation");
 }
+
+#[tokio::test]
+async fn subcribing_twice_sends_two_confirmation_emails() {
+    let test_app = spawn_app().await;
+    let body = "name=Jon%20Doe&email=jondoe%40email.com";
+
+    test_app.email_mock_200_response_with_times(2).await;
+    test_app.post_subscriptions(body.into()).await;
+    let second_request = test_app.post_subscriptions(body.into()).await;
+
+    let email_request = &test_app.email_server.received_requests().await.unwrap();
+
+    assert_eq!(2, email_request.len());
+    assert_eq!(200, second_request.status().as_u16());
+}
