@@ -88,11 +88,7 @@ pub async fn insert_subscriber(
         Utc::now()
     )
     .execute(transaction)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        e
-    })?;
+    .await?;
 
     Ok(subscriber_id)
 }
@@ -113,10 +109,7 @@ pub async fn store_token(
     )
     .execute(transaction)
     .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        StoreTokenError(e)
-    })?;
+    .map_err(|e| StoreTokenError(e))?;
 
     Ok(())
 }
@@ -135,10 +128,7 @@ pub async fn get_subscriber_id_from_token(
     )
     .fetch_optional(db_connection_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        RetrieveSubscriberError(e)
-    })?;
+    .map_err(|e| RetrieveSubscriberError(e))?;
     Ok(result.map(|r| r.subscriber_id))
 }
 
@@ -155,11 +145,7 @@ pub async fn confirm_subscriber(
         subscriber_id
     )
     .execute(db_connection_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        e
-    })?;
+    .await?;
     Ok(())
 }
 
@@ -177,10 +163,7 @@ pub async fn get_subscriber_id_from_email(
     )
     .fetch_optional(db_connection_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        RetrieveSubscriberError(e)
-    })?;
+    .map_err(|e| RetrieveSubscriberError(e))?;
     Ok(record.map(|r| r.id))
 }
 
@@ -194,10 +177,7 @@ pub async fn get_subscription_token_from_id(
     )
     .fetch_optional(db_connection_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        RetrieveTokenError(e)
-    })?;
+    .map_err(|e| RetrieveTokenError(e))?;
 
     Ok(record.map(|r| r.subscription_token))
 }
