@@ -1,7 +1,78 @@
-use crate::domain::Subscriber;
+use std::{error::Error, fmt::Debug};
+
+use crate::{domain::Subscriber, telemetry::error_chain_fmt};
 use chrono::Utc;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
+
+pub struct StoreTokenError(sqlx::Error);
+
+impl std::fmt::Display for StoreTokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "A database error was encountered while trying to store a subcription token"
+        )
+    }
+}
+
+impl Error for StoreTokenError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+impl Debug for StoreTokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+pub struct RetrieveTokenError(sqlx::Error);
+
+impl std::fmt::Display for RetrieveTokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "A database error was encountered while trying to retrieve the subcription token from the database"
+        )
+    }
+}
+
+impl Error for RetrieveTokenError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+impl Debug for RetrieveTokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+pub struct RetrieveSubscriberError(sqlx::Error);
+
+impl std::fmt::Display for RetrieveSubscriberError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "A database error was encountered while trying to retrieve the subcriber from the database"
+        )
+    }
+}
+
+impl Error for RetrieveSubscriberError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+impl Debug for RetrieveSubscriberError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
 
 #[tracing::instrument(name = "Saving subscriber in database", skip(subscriber, transaction))]
 pub async fn insert_subscriber(
@@ -17,11 +88,7 @@ pub async fn insert_subscriber(
         Utc::now()
     )
     .execute(transaction)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        e
-    })?;
+    .await?;
 
     Ok(subscriber_id)
 }
@@ -34,7 +101,7 @@ pub async fn store_token(
     transaction: &mut Transaction<'_, Postgres>,
     subscriber_id: Uuid,
     subscription_token: &str,
-) -> Result<(), sqlx::Error> {
+) -> Result<(), StoreTokenError> {
     sqlx::query!(
         r#"INSERT INTO subscription_tokens (subscription_token, subscriber_id) VALUES ($1, $2)"#,
         subscription_token,
@@ -42,10 +109,7 @@ pub async fn store_token(
     )
     .execute(transaction)
     .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        e
-    })?;
+    .map_err(|e| StoreTokenError(e))?;
 
     Ok(())
 }
@@ -57,17 +121,14 @@ pub async fn store_token(
 pub async fn get_subscriber_id_from_token(
     db_connection_pool: &PgPool,
     subscription_token: &str,
-) -> Result<Option<Uuid>, sqlx::Error> {
+) -> Result<Option<Uuid>, RetrieveSubscriberError> {
     let result = sqlx::query!(
         r#"SELECT subscriber_id FROM subscription_tokens WHERE subscription_token=$1"#,
         subscription_token
     )
     .fetch_optional(db_connection_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        e
-    })?;
+    .map_err(|e| RetrieveSubscriberError(e))?;
     Ok(result.map(|r| r.subscriber_id))
 }
 
@@ -84,11 +145,7 @@ pub async fn confirm_subscriber(
         subscriber_id
     )
     .execute(db_connection_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        e
-    })?;
+    .await?;
     Ok(())
 }
 
@@ -99,34 +156,28 @@ pub async fn confirm_subscriber(
 pub async fn get_subscriber_id_from_email(
     db_connection_pool: &PgPool,
     subscriber_email: &str,
-) -> Result<Option<Uuid>, sqlx::Error> {
+) -> Result<Option<Uuid>, RetrieveSubscriberError> {
     let record = sqlx::query!(
         r#"SELECT id FROM subscriptions WHERE email=$1"#,
         subscriber_email
     )
     .fetch_optional(db_connection_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        e
-    })?;
+    .map_err(|e| RetrieveSubscriberError(e))?;
     Ok(record.map(|r| r.id))
 }
 
 pub async fn get_subscription_token_from_id(
     db_connection_pool: &PgPool,
     subscriber_id: Uuid,
-) -> Result<Option<String>, sqlx::Error> {
+) -> Result<Option<String>, RetrieveTokenError> {
     let record = sqlx::query!(
         r#"SELECT subscription_token FROM subscription_tokens WHERE subscriber_id=$1"#,
         subscriber_id
     )
     .fetch_optional(db_connection_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        e
-    })?;
+    .map_err(|e| RetrieveTokenError(e))?;
 
     Ok(record.map(|r| r.subscription_token))
 }

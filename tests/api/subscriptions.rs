@@ -87,3 +87,18 @@ async fn subcribing_twice_sends_two_confirmation_emails() {
     assert_eq!(2, email_request.len());
     assert_eq!(200, second_request.status().as_u16());
 }
+
+#[tokio::test]
+async fn subcribe_fails_if_there_is_a_database_error() {
+    let test_app = spawn_app().await;
+    let body = "name=Jon%20Doe&email=jondoe%40email.com";
+
+    // sabotage the database
+    sqlx::query!("ALTER TABLE subscription_tokens DROP COLUMN subscription_token;")
+        .execute(&test_app.db_connection_pool)
+        .await
+        .unwrap();
+
+    let response = test_app.post_subscriptions(body.into()).await;
+    assert_eq!(500, response.status().as_u16());
+}
