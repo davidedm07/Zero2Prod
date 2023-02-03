@@ -1,7 +1,7 @@
 use crate::{
     database_helper::{
         get_subscriber_id_from_email, get_subscription_token_from_id, insert_subscriber,
-        store_token, RetrieveSubscriberError, RetrieveTokenError, StoreTokenError,
+        store_token,
     },
     domain::{Subscriber, SubscriberEmail, SubscriberName},
     email_client::EmailClient,
@@ -9,6 +9,7 @@ use crate::{
 };
 use actix_web::{web, HttpResponse, ResponseError};
 
+use anyhow::Context;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use reqwest::{StatusCode, Url};
 use serde::Deserialize;
@@ -24,20 +25,8 @@ pub struct FormData {
 pub enum SubscribeError {
     #[error("${0}")]
     ValidationError(String),
-    #[error("Failed to acquire database pool")]
-    PoolError(#[source] sqlx::Error),
-    #[error("Failed to retrieve subscriber from the database")]
-    RetrieveSubscriberError(#[from] RetrieveSubscriberError),
-    #[error("Failed to retrieve subscription token from the database")]
-    RetrieveTokenError(#[from] RetrieveTokenError),
-    #[error("Failed to insert a new subscriber in the database")]
-    InsertSubscriberError(#[source] sqlx::Error),
-    #[error("Failed to commit the transaction to store a new subscriber")]
-    TransactionCommitError(#[source] sqlx::Error),
-    #[error("Failed to store subscription token for a new subscriber")]
-    StoreTokenError(#[from] StoreTokenError),
-    #[error("Failed to send confirmation email.")]
-    SendEmailError(#[from] reqwest::Error),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
 }
 
 impl std::fmt::Debug for SubscribeError {
@@ -50,13 +39,7 @@ impl ResponseError for SubscribeError {
     fn status_code(&self) -> reqwest::StatusCode {
         match self {
             SubscribeError::ValidationError(_) => StatusCode::BAD_REQUEST,
-            SubscribeError::InsertSubscriberError(_)
-            | SubscribeError::RetrieveSubscriberError(_)
-            | SubscribeError::RetrieveTokenError(_)
-            | SubscribeError::TransactionCommitError(_)
-            | SubscribeError::PoolError(_)
-            | SubscribeError::StoreTokenError(_)
-            | SubscribeError::SendEmailError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            SubscribeError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
@@ -80,16 +63,25 @@ pub async fn subscribe(
         Err(_) => return Ok(HttpResponse::BadRequest().finish()),
     };
 
+    let confirmation_email_error_message = "Failed to send confirmation email";
+
     if let Some(subscriber_id) =
-        get_subscriber_id_from_email(&db_connection_pool, &subscriber.email.as_ref()).await?
+        get_subscriber_id_from_email(&db_connection_pool, &subscriber.email.as_ref())
+            .await
+            .context("Failed to get the subscriber from input email")?
     {
         let subscription_token =
-            match get_subscription_token_from_id(&db_connection_pool, subscriber_id).await? {
+            match get_subscription_token_from_id(&db_connection_pool, subscriber_id)
+                .await
+                .context("Failed to get the subcription token from subscriber id")?
+            {
                 Some(token) => token,
                 None => return Ok(HttpResponse::InternalServerError().finish()),
             };
 
-        send_confirmation_email(&email_client, subscriber, &base_url, &subscription_token).await?;
+        send_confirmation_email(&email_client, subscriber, &base_url, &subscription_token)
+            .await
+            .context(confirmation_email_error_message)?;
 
         return Ok(HttpResponse::Ok().finish());
     };
@@ -97,20 +89,24 @@ pub async fn subscribe(
     let mut transaction = db_connection_pool
         .begin()
         .await
-        .map_err(SubscribeError::PoolError)?;
+        .context("Failed to get the connection pool while beginning the transaction")?;
 
     let subscriber_id = insert_subscriber(&subscriber, &mut transaction)
         .await
-        .map_err(SubscribeError::InsertSubscriberError)?;
+        .context("Failed to insert the subcriber into the database")?;
     let subscription_token = generate_subscription_token();
-    store_token(&mut transaction, subscriber_id, &subscription_token).await?;
+    store_token(&mut transaction, subscriber_id, &subscription_token)
+        .await
+        .context("Failed to store the subscription token")?;
 
     transaction
         .commit()
         .await
-        .map_err(SubscribeError::TransactionCommitError)?;
+        .context("Failed to commit the transaction")?;
 
-    send_confirmation_email(&email_client, subscriber, &base_url, &subscription_token).await?;
+    send_confirmation_email(&email_client, subscriber, &base_url, &subscription_token)
+        .await
+        .context(confirmation_email_error_message)?;
 
     Ok(HttpResponse::Ok().finish())
 }
