@@ -20,6 +20,7 @@ rand = {version = "0.8", features = ["std_rng"]}
 secrecy = { version = "0.8", features = ["serde"] }
 serde = { version = "1.0.149", features = ["derive"] }
 serde-aux = "3"
+thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tracing = { version = "0.1.37", features = ["log"] }
 tracing-actix-web = "0.6"
