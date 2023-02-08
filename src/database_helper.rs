@@ -1,6 +1,9 @@
 use std::{error::Error, fmt::Debug};
 
-use crate::{domain::Subscriber, telemetry::error_chain_fmt};
+use crate::{
+    domain::{Subscriber, SubscriberEmail},
+    telemetry::error_chain_fmt,
+};
 use chrono::Utc;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
@@ -57,7 +60,7 @@ impl std::fmt::Display for RetrieveSubscriberError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A database error was encountered while trying to retrieve the subcriber from the database"
+            "A database error was encountered while trying to retrieve the subcriber/s from the database"
         )
     }
 }
@@ -180,4 +183,29 @@ pub async fn get_subscription_token_from_id(
     .map_err(|e| RetrieveTokenError(e))?;
 
     Ok(record.map(|r| r.subscription_token))
+}
+
+pub struct ConfirmedSubscriber {
+    pub email: SubscriberEmail,
+}
+
+pub async fn get_confirmed_subscribers(
+    db_connection_pool: &PgPool,
+) -> Result<Vec<Result<ConfirmedSubscriber, anyhow::Error>>, RetrieveSubscriberError> {
+    let rows = sqlx::query!(r#"SELECT email FROM subscriptions WHERE status='confirmed'"#,)
+        .fetch_all(db_connection_pool)
+        .await
+        .map_err(|e| RetrieveSubscriberError(e))?;
+
+    let confirmed_subscribers = rows
+        .into_iter()
+        .map(|row| match SubscriberEmail::parse(row.email) {
+            Ok(subscriber_email) => Ok(ConfirmedSubscriber {
+                email: subscriber_email,
+            }),
+            Err(error) => Err(anyhow::anyhow!(error)),
+        })
+        .collect();
+
+    Ok(confirmed_subscribers)
 }

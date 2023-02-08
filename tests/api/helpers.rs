@@ -1,5 +1,6 @@
 use once_cell::sync::Lazy;
 use reqwest::{Client, Response, Url};
+use serde_json::Value;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
@@ -26,6 +27,15 @@ impl TestApp {
             .post(&format!("{}/subscriptions", &self.address))
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body)
+            .send()
+            .await
+            .expect("Failed to execute request")
+    }
+
+    pub async fn post_newsletters(&self, json_body: Value) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(&format!("{}/newsletters", &self.address))
+            .json(&json_body)
             .send()
             .await
             .expect("Failed to execute request")
