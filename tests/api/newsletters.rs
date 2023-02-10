@@ -78,6 +78,27 @@ async fn newsletters_returns_400_for_invalid_data() {
     }
 }
 
+#[tokio::test]
+async fn requests_without_authorization_header_are_rejected() {
+    let test_app = spawn_app().await;
+    let newsletter_request_body = serde_json::json!({
+        "title": "Newsletter Title",
+        "content": {
+            "text":"Newsletter body as plain text",
+            "html":"<p> Newsletter body as HTML </p>"
+        }
+    });
+
+    let response = reqwest::Client::new()
+        .post(&format!("{}/newsletters", test_app.address))
+        .json(&newsletter_request_body)
+        .send()
+        .await
+        .expect("Failed to execute request");
+
+    assert_eq!(401, response.status().as_u16());
+}
+
 async fn create_unconfirmed_subscriber(test_app: &TestApp) {
     let body = "name=Jon%20Doe&email=jondoe%40email.com";
 
