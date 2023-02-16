@@ -2,7 +2,8 @@ use actix_web::{http::header::HeaderMap, web, HttpRequest, HttpResponse, Respons
 use anyhow::Context;
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{header::HeaderValue, StatusCode};
-use secrecy::Secret;
+use secrecy::{ExposeSecret, Secret};
+use sha3::Digest;
 use sqlx::PgPool;
 
 use crate::{
@@ -22,7 +23,7 @@ pub struct Content {
     text: String,
 }
 
-struct Credentials {
+pub struct Credentials {
     username: String,
     password: Secret<String>,
 }
@@ -94,7 +95,8 @@ fn basic_authentication(headers: &HeaderMap) -> Result<Credentials, anyhow::Erro
 
 #[tracing::instrument(
     name = "Publishing a newsletter",
-    skip(body, db_connection_pool, email_client)
+    skip(body, db_connection_pool, email_client, request),
+    fields(username=tracing::field::Empty, user_id=tracing::field::Empty)
 )]
 pub async fn publish_newsletter(
     body: web::Json<BodyData>,
@@ -102,7 +104,14 @@ pub async fn publish_newsletter(
     email_client: web::Data<EmailClient>,
     request: HttpRequest,
 ) -> Result<HttpResponse, PublishError> {
-    let _credentials = basic_authentication(request.headers()).map_err(PublishError::AuthError)?;
+    let credentials = basic_authentication(request.headers()).map_err(PublishError::AuthError)?;
+
+    tracing::Span::current().record("username", &tracing::field::display(&credentials.username));
+
+    let user_id = validate_credentials(credentials, &db_connection_pool).await?;
+
+    tracing::Span::current().record("user_id", &tracing::field::display(&user_id));
+
     let confirmed_subscribers = get_confirmed_subscribers(&db_connection_pool)
         .await
         .context("Failed to retrieve confirmed subscribers")?;
@@ -130,4 +139,29 @@ pub async fn publish_newsletter(
     }
 
     Ok(HttpResponse::Ok().finish())
+}
+
+async fn validate_credentials(
+    credentials: Credentials,
+    db_connection_pool: &PgPool,
+) -> Result<uuid::Uuid, PublishError> {
+    let password_hash = format!(
+        "{:x}",
+        sha3::Sha3_256::digest(credentials.password.expose_secret().as_bytes())
+    );
+
+    let user_id: Option<_> = sqlx::query!(
+        r#"SELECT user_id FROM users WHERE username=$1 AND password=$2"#,
+        credentials.username,
+        password_hash,
+    )
+    .fetch_optional(db_connection_pool)
+    .await
+    .context("Failed to perform a query to validate user credentials")
+    .map_err(PublishError::AuthError)?;
+
+    user_id
+        .map(|row| row.user_id)
+        .ok_or_else(|| anyhow::anyhow!("Invalid username or password."))
+        .map_err(PublishError::AuthError)
 }

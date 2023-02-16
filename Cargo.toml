@@ -19,6 +19,7 @@ chrono = { version = "0.4.23", default-features = false, feautures = ["clock"] }
 claim = "0.5"
 config = "0.13"
 rand = {version = "0.8", features = ["std_rng"]}
+sha3 = "0.10.6"
 secrecy = { version = "0.8", features = ["serde"] }
 serde = { version = "1.0.149", features = ["derive"] }
 serde-aux = "3"
