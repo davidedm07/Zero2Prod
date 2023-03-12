@@ -1,3 +1,4 @@
+use uuid::Uuid;
 use wiremock::{
     matchers::{method, path},
     Mock, ResponseTemplate,
@@ -97,6 +98,66 @@ async fn requests_without_authorization_header_are_rejected() {
         .expect("Failed to execute request");
 
     assert_eq!(401, response.status().as_u16());
+}
+
+#[tokio::test]
+async fn non_existing_user_is_rejected() {
+    let test_app = spawn_app().await;
+    let username = Uuid::new_v4().to_string();
+    let password = Uuid::new_v4().to_string();
+
+    let newsletter_request_body = serde_json::json!({
+        "title": "Newsletter Title",
+        "content": {
+            "text":"Newsletter body as plain text",
+            "html":"<p> Newsletter body as HTML </p>"
+        }
+    });
+
+    let response = reqwest::Client::new()
+        .post(&format!("{}/newsletters", test_app.address))
+        .basic_auth(username, Some(password))
+        .json(&newsletter_request_body)
+        .send()
+        .await
+        .expect("Failed to execute request");
+
+    assert_eq!(401, response.status().as_u16());
+    assert_eq!(
+        r#"Basic realm="publish""#,
+        response.headers()["WWW-Authenticate"]
+    );
+}
+
+#[tokio::test]
+async fn invalid_password_is_rejected() {
+    let test_app = spawn_app().await;
+    let username = &test_app.test_user.username;
+    let password = Uuid::new_v4().to_string();
+
+    assert_ne!(password, test_app.test_user.password);
+
+    let newsletter_request_body = serde_json::json!({
+        "title": "Newsletter Title",
+        "content": {
+            "text":"Newsletter body as plain text",
+            "html":"<p> Newsletter body as HTML </p>"
+        }
+    });
+
+    let response = reqwest::Client::new()
+        .post(&format!("{}/newsletters", test_app.address))
+        .basic_auth(username, Some(password))
+        .json(&newsletter_request_body)
+        .send()
+        .await
+        .expect("Failed to execute request");
+
+    assert_eq!(401, response.status().as_u16());
+    assert_eq!(
+        r#"Basic realm="publish""#,
+        response.headers()["WWW-Authenticate"]
+    );
 }
 
 async fn create_unconfirmed_subscriber(test_app: &TestApp) {

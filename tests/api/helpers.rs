@@ -25,9 +25,9 @@ pub struct ConfirmationLinks {
 }
 
 pub struct TestUser {
-    user_id: Uuid,
-    username: String,
-    password: String,
+    pub user_id: Uuid,
+    pub username: String,
+    pub password: String,
 }
 
 impl TestUser {
