@@ -1,3 +1,4 @@
+pub mod authentication;
 pub mod configuration;
 pub mod database_helper;
 pub mod domain;

@@ -4,7 +4,9 @@ use crate::{
     domain::{Subscriber, SubscriberEmail},
     telemetry::error_chain_fmt,
 };
+use anyhow::Context;
 use chrono::Utc;
+use secrecy::Secret;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -208,4 +210,21 @@ pub async fn get_confirmed_subscribers(
         .collect();
 
     Ok(confirmed_subscribers)
+}
+
+#[tracing::instrument(name = "Get stored credentials", skip(db_connection_pool, username))]
+pub async fn get_stored_credentials(
+    username: &str,
+    db_connection_pool: &PgPool,
+) -> Result<Option<(uuid::Uuid, Secret<String>)>, anyhow::Error> {
+    let row = sqlx::query!(
+        r#"SELECT user_id, password FROM users WHERE username = $1"#,
+        username
+    )
+    .fetch_optional(db_connection_pool)
+    .await
+    .context("Failed to retrieve stored credentials")?
+    .map(|row| (row.user_id, Secret::new(row.password)));
+
+    Ok(row)
 }
